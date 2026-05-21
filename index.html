@@ -99,6 +99,12 @@
       font-size: 16px;
     }
 
+    .help-text {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #666;
+    }
+
     .button-row {
       display: flex;
       gap: 8px;
@@ -166,6 +172,13 @@
     .message.own {
       margin-left: auto;
       background: #dbeafe;
+    }
+
+    .message-author {
+      font-size: 12px;
+      font-weight: 700;
+      color: #444;
+      margin-bottom: 4px;
     }
 
     .message-body {
@@ -252,6 +265,10 @@
           <label for="passwordInput">パスワード</label>
           <input id="passwordInput" type="password" autocomplete="current-password" />
 
+          <label for="handleNameInput">ハンドルネーム（新規登録時）</label>
+          <input id="handleNameInput" type="text" maxlength="30" placeholder="例：たくご" />
+          <div class="help-text">ログイン時は入力不要です。新規登録時のみ使います。</div>
+
           <div class="button-row">
             <button id="signupBtn">新規登録</button>
             <button id="loginBtn" class="secondary">ログイン</button>
@@ -288,6 +305,7 @@
     const chatArea = document.querySelector("#chatArea");
     const emailInput = document.querySelector("#emailInput");
     const passwordInput = document.querySelector("#passwordInput");
+    const handleNameInput = document.querySelector("#handleNameInput");
     const signupBtn = document.querySelector("#signupBtn");
     const loginBtn = document.querySelector("#loginBtn");
     const authStatus = document.querySelector("#authStatus");
@@ -298,7 +316,9 @@
     const sendBtn = document.querySelector("#sendBtn");
 
     let currentUser = null;
+    let currentProfile = null;
     let messages = [];
+    let profilesByUserId = new Map();
     let messagesChannel = null;
 
     function setStatus(text) {
@@ -307,6 +327,7 @@
 
     function formatDate(value) {
       const date = new Date(value);
+
       return date.toLocaleString("ja-JP", {
         month: "2-digit",
         day: "2-digit",
@@ -317,7 +338,9 @@
 
     function updateUI() {
       if (currentUser) {
-        userInfo.textContent = `ログイン中：${currentUser.email}`;
+        const displayName = currentProfile?.handle_name ?? currentUser.email;
+
+        userInfo.textContent = `ログイン中：${displayName}`;
         authArea.classList.add("hidden");
         chatArea.classList.remove("hidden");
         logoutBtn.classList.remove("hidden");
@@ -326,6 +349,9 @@
         authArea.classList.remove("hidden");
         chatArea.classList.add("hidden");
         logoutBtn.classList.add("hidden");
+
+        currentProfile = null;
+        profilesByUserId.clear();
         messages = [];
         renderMessages();
       }
@@ -350,6 +376,10 @@
         const item = document.createElement("div");
         item.className = isOwn ? "message own" : "message";
 
+        const author = document.createElement("div");
+        author.className = "message-author";
+        author.textContent = profilesByUserId.get(message.user_id) ?? "名無し";
+
         const body = document.createElement("div");
         body.className = "message-body";
         body.textContent = message.body;
@@ -369,15 +399,91 @@
           deleteBtn.addEventListener("click", () => {
             deleteMessage(message.id);
           });
+
           meta.appendChild(deleteBtn);
         }
 
+        item.appendChild(author);
         item.appendChild(body);
         item.appendChild(meta);
         messagesEl.appendChild(item);
       }
 
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function getDefaultHandleName() {
+      const metadataName = currentUser?.user_metadata?.handle_name?.trim();
+
+      if (metadataName) {
+        return metadataName;
+      }
+
+      const emailName = currentUser?.email?.split("@")[0];
+
+      return emailName || "名無し";
+    }
+
+    async function ensureProfile() {
+      if (!currentUser) return;
+
+      const { data: existingProfile, error: selectError } = await supabaseClient
+        .from("profiles")
+        .select("user_id, handle_name")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+
+      if (selectError) {
+        setStatus(`プロフィール取得エラー：${selectError.message}`);
+        return;
+      }
+
+      if (existingProfile) {
+        currentProfile = existingProfile;
+        profilesByUserId.set(existingProfile.user_id, existingProfile.handle_name);
+        return;
+      }
+
+      const handleName = getDefaultHandleName();
+
+      const { data: newProfile, error: insertError } = await supabaseClient
+        .from("profiles")
+        .insert({
+          user_id: currentUser.id,
+          handle_name: handleName
+        })
+        .select("user_id, handle_name")
+        .single();
+
+      if (insertError) {
+        setStatus(`プロフィール作成エラー：${insertError.message}`);
+        return;
+      }
+
+      currentProfile = newProfile;
+      profilesByUserId.set(newProfile.user_id, newProfile.handle_name);
+    }
+
+    async function loadProfiles(userIds) {
+      const uniqueUserIds = [...new Set(userIds)].filter(Boolean);
+
+      if (uniqueUserIds.length === 0) {
+        return;
+      }
+
+      const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("user_id, handle_name")
+        .in("user_id", uniqueUserIds);
+
+      if (error) {
+        setStatus(`プロフィール一覧取得エラー：${error.message}`);
+        return;
+      }
+
+      for (const profile of data ?? []) {
+        profilesByUserId.set(profile.user_id, profile.handle_name);
+      }
     }
 
     async function loadMessages() {
@@ -394,15 +500,24 @@
       }
 
       messages = data ?? [];
+
+      await loadProfiles(messages.map((message) => message.user_id));
+
       renderMessages();
     }
 
     async function signup() {
       const email = emailInput.value.trim();
       const password = passwordInput.value;
+      const handleName = handleNameInput.value.trim();
 
-      if (!email || !password) {
-        setStatus("メールアドレスとパスワードを入力してください。");
+      if (!email || !password || !handleName) {
+        setStatus("新規登録時は、メールアドレス・パスワード・ハンドルネームを入力してください。");
+        return;
+      }
+
+      if (handleName.length > 30) {
+        setStatus("ハンドルネームは30文字以内にしてください。");
         return;
       }
 
@@ -410,7 +525,12 @@
 
       const { data, error } = await supabaseClient.auth.signUp({
         email,
-        password
+        password,
+        options: {
+          data: {
+            handle_name: handleName
+          }
+        }
       });
 
       if (error) {
@@ -515,12 +635,14 @@
             schema: "public",
             table: "messages"
           },
-          (payload) => {
+          async (payload) => {
             const newMessage = payload.new;
 
             if (messages.some((message) => message.id === newMessage.id)) {
               return;
             }
+
+            await loadProfiles([newMessage.user_id]);
 
             messages.push(newMessage);
             messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -552,12 +674,16 @@
 
     async function handleAuthChanged(session) {
       currentUser = session?.user ?? null;
-      updateUI();
 
       if (currentUser) {
+        await ensureProfile();
+        updateUI();
         await loadMessages();
         subscribeMessages();
       } else {
+        currentProfile = null;
+        profilesByUserId.clear();
+        updateUI();
         unsubscribeMessages();
       }
     }
