@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supabase Chat App</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f2f4f8;
+      color: #222;
+    }
+
+    .app {
+      max-width: 760px;
+      margin: 0 auto;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border-left: 1px solid #ddd;
+      border-right: 1px solid #ddd;
+    }
+
+    header {
+      padding: 14px 16px;
+      background: #222;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .user-info {
+      font-size: 12px;
+      opacity: 0.9;
+      word-break: break-all;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .panel {
+      padding: 16px;
+    }
+
+    .auth-box {
+      max-width: 420px;
+      margin: 40px auto;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      background: #fafafa;
+    }
+
+    .auth-box h2 {
+      margin-top: 0;
+      font-size: 20px;
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    input,
+    textarea,
+    button {
+      font: inherit;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      background: #2563eb;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .secondary {
+      background: #555;
+    }
+
+    .danger {
+      background: #dc2626;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .status {
+      margin-top: 12px;
+      font-size: 14px;
+      color: #444;
+      white-space: pre-wrap;
+    }
+
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      background: #eef2f7;
+    }
+
+    .message {
+      max-width: 78%;
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .message.own {
+      margin-left: auto;
+      background: #dbeafe;
+    }
+
+    .message-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+
+    .message-meta {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #666;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .send-form {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-top: 1px solid #ddd;
+      background: #fff;
+    }
+
+    .send-form textarea {
+      height: 48px;
+      resize: none;
+      margin-top: 0;
+    }
+
+    .send-form button {
+      min-width: 72px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 600px) {
+      .app {
+        border: none;
+      }
+
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .message {
+        max-width: 90%;
+      }
+
+      .send-form {
+        flex-direction: column;
+      }
+
+      .send-form button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>Supabase Chat</h1>
+        <div id="userInfo" class="user-info">未ログイン</div>
+      </div>
+      <button id="logoutBtn" class="secondary hidden">ログアウト</button>
+    </header>
+
+    <main>
+      <section id="authArea" class="panel">
+        <div class="auth-box">
+          <h2>ログイン / 新規登録</h2>
+
+          <label for="emailInput">メールアドレス</label>
+          <input id="emailInput" type="email" autocomplete="email" />
+
+          <label for="passwordInput">パスワード</label>
+          <input id="passwordInput" type="password" autocomplete="current-password" />
+
+          <div class="button-row">
+            <button id="signupBtn">新規登録</button>
+            <button id="loginBtn" class="secondary">ログイン</button>
+          </div>
+
+          <div id="authStatus" class="status"></div>
+        </div>
+      </section>
+
+      <section id="chatArea" class="chat-area hidden">
+        <div id="messages" class="messages"></div>
+
+        <form id="sendForm" class="send-form">
+          <textarea id="messageInput" maxlength="1000" placeholder="メッセージを入力"></textarea>
+          <button id="sendBtn" type="submit">送信</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://vblnpljttavftdnsjlmh.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_57s210LTEokoxev1dvBvUQ_3LS46fkz";
+
+    const supabaseClient = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY
+    );
+
+    const userInfo = document.querySelector("#userInfo");
+    const logoutBtn = document.querySelector("#logoutBtn");
+
+    const authArea = document.querySelector("#authArea");
+    const chatArea = document.querySelector("#chatArea");
+    const emailInput = document.querySelector("#emailInput");
+    const passwordInput = document.querySelector("#passwordInput");
+    const signupBtn = document.querySelector("#signupBtn");
+    const loginBtn = document.querySelector("#loginBtn");
+    const authStatus = document.querySelector("#authStatus");
+
+    const messagesEl = document.querySelector("#messages");
+    const sendForm = document.querySelector("#sendForm");
+    const messageInput = document.querySelector("#messageInput");
+    const sendBtn = document.querySelector("#sendBtn");
+
+    let currentUser = null;
+    let messages = [];
+    let messagesChannel = null;
+
+    function setStatus(text) {
+      authStatus.textContent = text;
+    }
+
+    function formatDate(value) {
+      const date = new Date(value);
+      return date.toLocaleString("ja-JP", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    function updateUI() {
+      if (currentUser) {
+        userInfo.textContent = `ログイン中：${currentUser.email}`;
+        authArea.classList.add("hidden");
+        chatArea.classList.remove("hidden");
+        logoutBtn.classList.remove("hidden");
+      } else {
+        userInfo.textContent = "未ログイン";
+        authArea.classList.remove("hidden");
+        chatArea.classList.add("hidden");
+        logoutBtn.classList.add("hidden");
+        messages = [];
+        renderMessages();
+      }
+    }
+
+    function renderMessages() {
+      messagesEl.innerHTML = "";
+
+      if (!currentUser) return;
+
+      if (messages.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "status";
+        empty.textContent = "まだメッセージはありません。";
+        messagesEl.appendChild(empty);
+        return;
+      }
+
+      for (const message of messages) {
+        const isOwn = message.user_id === currentUser.id;
+
+        const item = document.createElement("div");
+        item.className = isOwn ? "message own" : "message";
+
+        const body = document.createElement("div");
+        body.className = "message-body";
+        body.textContent = message.body;
+
+        const meta = document.createElement("div");
+        meta.className = "message-meta";
+
+        const time = document.createElement("span");
+        time.textContent = formatDate(message.created_at);
+
+        meta.appendChild(time);
+
+        if (isOwn) {
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "danger";
+          deleteBtn.textContent = "削除";
+          deleteBtn.addEventListener("click", () => {
+            deleteMessage(message.id);
+          });
+          meta.appendChild(deleteBtn);
+        }
+
+        item.appendChild(body);
+        item.appendChild(meta);
+        messagesEl.appendChild(item);
+      }
+
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function loadMessages() {
+      if (!currentUser) return;
+
+      const { data, error } = await supabaseClient
+        .from("messages")
+        .select("id, user_id, body, created_at")
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        setStatus(`メッセージ取得エラー：${error.message}`);
+        return;
+      }
+
+      messages = data ?? [];
+      renderMessages();
+    }
+
+    async function signup() {
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!email || !password) {
+        setStatus("メールアドレスとパスワードを入力してください。");
+        return;
+      }
+
+      setStatus("新規登録中...");
+
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password
+      });
+
+      if (error) {
+        setStatus(`新規登録エラー：${error.message}`);
+        return;
+      }
+
+      if (!data.session) {
+        setStatus("新規登録しました。確認メールが必要な設定の場合は、メールを確認してください。");
+        return;
+      }
+
+      setStatus("新規登録してログインしました。");
+    }
+
+    async function login() {
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!email || !password) {
+        setStatus("メールアドレスとパスワードを入力してください。");
+        return;
+      }
+
+      setStatus("ログイン中...");
+
+      const { error } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        setStatus(`ログインエラー：${error.message}`);
+        return;
+      }
+
+      setStatus("");
+    }
+
+    async function logout() {
+      await supabaseClient.auth.signOut();
+      setStatus("ログアウトしました。");
+    }
+
+    async function sendMessage(event) {
+      event.preventDefault();
+
+      if (!currentUser) return;
+
+      const body = messageInput.value.trim();
+
+      if (!body) {
+        return;
+      }
+
+      sendBtn.disabled = true;
+
+      const { error } = await supabaseClient
+        .from("messages")
+        .insert({
+          user_id: currentUser.id,
+          body
+        });
+
+      sendBtn.disabled = false;
+
+      if (error) {
+        setStatus(`送信エラー：${error.message}`);
+        return;
+      }
+
+      messageInput.value = "";
+      setStatus("");
+    }
+
+    async function deleteMessage(messageId) {
+      if (!currentUser) return;
+
+      const { error } = await supabaseClient
+        .from("messages")
+        .delete()
+        .eq("id", messageId)
+        .eq("user_id", currentUser.id);
+
+      if (error) {
+        setStatus(`削除エラー：${error.message}`);
+      }
+    }
+
+    function subscribeMessages() {
+      if (messagesChannel) {
+        supabaseClient.removeChannel(messagesChannel);
+        messagesChannel = null;
+      }
+
+      messagesChannel = supabaseClient
+        .channel("messages-realtime")
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages"
+          },
+          (payload) => {
+            const newMessage = payload.new;
+
+            if (messages.some((message) => message.id === newMessage.id)) {
+              return;
+            }
+
+            messages.push(newMessage);
+            messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            renderMessages();
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "DELETE",
+            schema: "public",
+            table: "messages"
+          },
+          (payload) => {
+            const deletedMessage = payload.old;
+            messages = messages.filter((message) => message.id !== deletedMessage.id);
+            renderMessages();
+          }
+        )
+        .subscribe();
+    }
+
+    function unsubscribeMessages() {
+      if (messagesChannel) {
+        supabaseClient.removeChannel(messagesChannel);
+        messagesChannel = null;
+      }
+    }
+
+    async function handleAuthChanged(session) {
+      currentUser = session?.user ?? null;
+      updateUI();
+
+      if (currentUser) {
+        await loadMessages();
+        subscribeMessages();
+      } else {
+        unsubscribeMessages();
+      }
+    }
+
+    signupBtn.addEventListener("click", signup);
+    loginBtn.addEventListener("click", login);
+    logoutBtn.addEventListener("click", logout);
+    sendForm.addEventListener("submit", sendMessage);
+
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+      handleAuthChanged(session);
+    });
+
+    async function init() {
+      const { data } = await supabaseClient.auth.getSession();
+      await handleAuthChanged(data.session);
+    }
+
+    init();
+  </script>
+</body>
+</html>
